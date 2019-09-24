@@ -42,7 +42,7 @@ def attack_fgsm(model, X, y, epsilon):
     return delta.detach()
 
 
-def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, norm):
+def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts):
     max_loss = torch.zeros(y.shape[0]).cuda()
     max_delta = torch.zeros_like(X).cuda()
     for _ in range(restarts):
@@ -59,12 +59,7 @@ def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, norm):
             loss = F.cross_entropy(output, y)
             loss.backward()
             grad = delta.grad.detach()
-            if norm == 'l_inf':
-                delta.data[index[0], :, :, :] = clamp(delta[index[0], :, :, :] + alpha * torch.sign(grad[index[0], :, :, :]), -epsilon, epsilon)
-            elif norm == 'l_2':
-                grad_norms = grad.view(grad.shape[0], -1).norm(dim=1)[:, None, None, None]
-                delta.data += alpha * grad / grad_norms
-                delta.data *= epsilon / torch.max(delta.detach(), epsilon)
+            delta.data[index[0], :, :, :] = clamp(delta[index[0], :, :, :] + alpha * torch.sign(grad[index[0], :, :, :]), -epsilon, epsilon)
             delta.grad.zero_()
         all_loss = F.cross_entropy(model(X+delta), y, reduction='none')
         max_delta[all_loss >= max_loss] = delta.detach()[all_loss >= max_loss]
@@ -100,7 +95,6 @@ def get_args():
     parser.add_argument('--attack-iters', default=50, type=int)
     parser.add_argument('--alpha', default=2, type=int)
     parser.add_argument('--restarts', default=10, type=int)
-    parser.add_argument('--norm', default='l_inf', type=str, choices=['l_inf', 'l_2'])
     parser.add_argument('--seed', default=0, type=int)
     return parser.parse_args()
 
@@ -143,11 +137,9 @@ def main():
         for batch in batches:
             X, y = batch['input'], batch['target']
             if args.attack == 'pgd':
-                delta = attack_pgd(model, X, y, epsilon, alpha, args.attack_iters, args.restarts, args.norm)
+                delta = attack_pgd(model, X, y, epsilon, alpha, args.attack_iters, args.restarts)
             elif args.attack == 'fgsm':
                 delta = attack_fgsm(model, X, y, epsilon)
-            elif args.attack == 'ddn':
-                delta = attack_ddn(model, X, y, args.attack_iters, max_norm=epsilon)
             with torch.no_grad():
                 output = model(clamp(X + delta, lower_limit, upper_limit))
                 loss = F.cross_entropy(output, y)
