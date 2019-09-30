@@ -52,14 +52,19 @@ def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts):
         delta[:, 2, :, :].uniform_(-epsilon[2][0][0].item(), epsilon[2][0][0].item())
         delta.requires_grad = True
         for _ in range(attack_iters):
-            output = model(clamp(X + delta, lower_limit, upper_limit))
+            output = model(X + delta)
             index = torch.where(output.max(1)[1] == y)
             if len(index[0]) == 0:
                 break
             loss = F.cross_entropy(output, y)
             loss.backward()
             grad = delta.grad.detach()
-            delta.data[index[0], :, :, :] = clamp(delta[index[0], :, :, :] + alpha * torch.sign(grad[index[0], :, :, :]), -epsilon, epsilon)
+            d = delta[index[0], :, :, :]
+            g = grad[index[0], :, :, :]
+            x = X[index[0], :, :, :]
+            d = clamp(d + alpha * torch.sign(g), -epsilon, epsilon)
+            d = clamp(d, lower_limit - x, upper_limit - x)
+            delta.data[index[0], :, :, :] = d
             delta.grad.zero_()
         all_loss = F.cross_entropy(model(X+delta), y, reduction='none')
         max_delta[all_loss >= max_loss] = delta.detach()[all_loss >= max_loss]
@@ -141,7 +146,7 @@ def main():
             elif args.attack == 'fgsm':
                 delta = attack_fgsm(model, X, y, epsilon)
             with torch.no_grad():
-                output = model(clamp(X + delta, lower_limit, upper_limit))
+                output = model(X + delta)
                 loss = F.cross_entropy(output, y)
                 total_loss += loss.item() * y.size(0)
                 total_acc += (output.max(1)[1] == y).sum().item()
